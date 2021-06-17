@@ -799,13 +799,14 @@ void *connection_handler(void *socket_desc)
     //Receive a message from client
     while ((read_size = recv(sock, client_message, 1024, 0)) > 0)
     {
-        if(strlen(client_message) == 0 || client_message[0] >= 33 || client_message[0] <= 126)
+        if (strlen(client_message) == 0 || !(client_message[0] >= 33 && client_message[0] <= 126))
         {
             continue;
         }
+
         printf("%s\n", client_message);
         sprintf(queryGlobal, "%s", client_message);
-        // handleCommand();
+
         if (safe_run(handleCommand))
         {
             printf("Query Success!\n");

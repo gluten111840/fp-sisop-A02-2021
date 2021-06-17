@@ -17,6 +17,7 @@
 void *connection_handler(void *);
 
 #define str_size 1024
+#define SIZE_BUF 100
 
 struct userStruct
 {
@@ -32,6 +33,21 @@ char queryGlobal[str_size];
 char databases[100][256];
 struct userStruct userList[100];
 char cwd[str_size];
+
+int checkIdentity(char id[], char password[]){
+    char akun[1000], temp[100];
+    FILE *fp = fopen("users", "r");
+    // Loop per line
+    while(fscanf(fp, "%s", temp) == 1){
+        // Cek apakah id:password sudah ada.
+        if(strstr(temp, akun)!=0) {
+                fclose(fp);
+                return 1;
+        }
+    }
+    fclose(fp);
+    return 0;
+}
 
 static void sig_handler(int signo)
 {
@@ -364,8 +380,6 @@ void handleCommand()
             {
                 printf("\t   Making Database: %s\n", databaseName);
                 mkdir(filepath, 777);
-                sprintf(filepath, "%s/[[table]]", filepath);
-                mkfile(filepath);
                 appendToFile("databases", databaseName);
             }
             else
@@ -726,6 +740,19 @@ int main(int argc, char *argv[])
         {
             puts("Connection accepted");
 
+            // Waits for incoming message from client.
+        // ret_val2 = recv(sock, id, sizeof(id), 0);
+        // ret_val3 = recv(sock, password, sizeof(password), 0);
+        // if(!checkIdentity(id, password))
+        //     status_val = send(sock,
+        //         "wrongpass", SIZE_BUF, 0);
+        // else {
+        //     loggedin = 1;
+        //     status_val = send(sock,
+        //                     "regloginsuccess", SIZE_BUF, 0);
+        //     sprintf(idpass, "%s:%s", id, password);
+        // }
+
             pthread_t sniffer_thread;
             new_sock = malloc(1);
             *new_sock = client_sock;
@@ -759,15 +786,23 @@ int main(int argc, char *argv[])
  * */
 void *connection_handler(void *socket_desc)
 {
+    int loggedin = 0;
     //Get the socket descriptor
     int sock = *(int *)socket_desc;
     int read_size;
     char *message, client_message[1024];
+    int ret_val2, ret_val3, status_val;
+    char id[SIZE_BUF], password[SIZE_BUF];
+    char idpass[256];
 
     bzero(client_message, 1024 * sizeof(client_message[0]));
     //Receive a message from client
     while ((read_size = recv(sock, client_message, 1024, 0)) > 0)
     {
+        if(strlen(client_message) == 0 || client_message[0] >= 33 || client_message[0] <= 126)
+        {
+            continue;
+        }
         printf("%s\n", client_message);
         sprintf(queryGlobal, "%s", client_message);
         // handleCommand();
@@ -786,7 +821,6 @@ void *connection_handler(void *socket_desc)
         bzero(client_message, 1024 * sizeof(client_message[0]));
         bzero(message, 1024 * sizeof(message[0]));
     }
-
     if (read_size == 0)
     {
         puts("Client Disconnected\n");

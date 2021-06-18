@@ -640,12 +640,30 @@ void handleCommand()
 
     else if(!strcmp(cmd, "USE"))
     {
-        char tmp[str_size];
+        char tmpLine[str_size];
         char *dbName = strlwr(getBetween(query, "USE ", ";"));
-        printf("\t--  Database Name: {%s}\n", dbName);
-        sprintf(currentDB, "%s/%s", cwd, dbName);
-        printf("%s\n", currentDB);
-        
+        int isAuth;
+        if(getRoot())
+        {
+            char tmp[str_size];
+            printf("\t--  Database Name: {%s}\n", dbName);
+            sprintf(currentDB, "%s", dbName);
+            printf("%s\n", currentDB);
+        }
+        else
+        {
+            FILE *perm = fopen("permission", "r");
+            char *curName, *curDB, *p;
+            while(fgets(tmpLine, sizeof(tmpLine), perm) != NULL) {
+                curName = trimString(strtok_r(tmpLine, " -> ", &p));
+                curDB = trimString(strtok_r(NULL, " -> ", &p));
+                printf("name: %s\ndb: %s\n", curName, curDB);
+                if(!strcmp(dbName, curDB) && !strcmp(dbName, curDB)) {
+                    isAuth = 1;
+                    sprintf(currentDB, "%s", dbName);
+                }
+            }
+        }
     }
 
     /*

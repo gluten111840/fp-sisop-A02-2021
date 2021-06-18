@@ -59,6 +59,10 @@ int main(int argc, char *argv[])
 		TAMBAHIN CODE BUAT KIRIM AUTENTIKASI KE SERVER DISINI
 		BIAR SERVER BISA BEDAIN SUDO ATAU ENGGA
 		*/
+		sprintf(unpass, "root:::pass:::\n");
+		send(sock, unpass, sizeof(unpass), 0);
+		while((wait(&tunggu)) > 0);
+		recv(sock, server_reply, 1024, 0);
 
 		if (server_reply == "User not found")
 		{

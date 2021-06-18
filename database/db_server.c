@@ -33,6 +33,9 @@ char queryGlobal[str_size];
 char databases[100][256];
 struct userStruct userList[100];
 char cwd[str_size];
+int jalan = 0;
+int sock;
+char unpassroot[str_size];
 
 int checkIdentity(char idpass[]){
     FILE *fp = fopen("users", "r");
@@ -42,11 +45,34 @@ int checkIdentity(char idpass[]){
     while (fgets(line, line_size, fp) != NULL)  {
         // printf("%s ~\n", line);
         if(!strcmp(idpass, line)) {
-            printf("KETEMUUUU\n");
+            // printf("KETEMUUUU\n");
             fclose(fp);
             return 1;
         }
-        printf("GAADA NGAB :(\n");
+        // printf("GAADA NGAB :(\n");
+    }
+    free(line);
+    return 0;
+}
+
+int getRoot()
+{
+    FILE *fp = fopen("users", "r");
+
+    const size_t line_size = 300;
+    char* line = malloc(line_size);
+    while (fgets(line, line_size, fp) != NULL)  {
+        // printf("%s ~\n", line);
+        if(strcmp(unpassroot, "root:::pass:::\n"))
+        {
+            return 0;
+        }
+        if(!strcmp(unpassroot, line)) {
+            // printf("KETEMUUUU\n");
+            fclose(fp);
+            return 1;
+        }
+        // printf("GAADA NGAB :(\n");
     }
     free(line);
     return 0;
@@ -277,7 +303,7 @@ int getDatabaseList(char dbName[])
 {
     FILE *fp = fopen("databases", "r");
 
-    const size_t line_size = 300;
+    const size_t line_size = 3000;
     char* line = malloc(line_size);
     while (fgets(line, line_size, fp) != NULL)  {
         // printf("%s ~\n", line);
@@ -354,44 +380,54 @@ void handleCommand()
         /*
         //// CREATE USER ////
         */
+        
         if (!strcmp(subcmd, "USER"))
         {
             char *username, *password;
             char tmp[str_size];
-
-            username = getBetween(query, "USER ", " ");
-            printf("\t   --  Username: {%s}\n", username);
-            sprintf(tmp, "%s ", username);
-
-            free(subcmd);
-            subcmd = strupr(getBetween(query, tmp, " "));
-            printf("\t   --  [%s]\n", subcmd);
-
-            if (!strcmp(subcmd, "IDENTIFIED"))
+            if(getRoot())
             {
+                username = getBetween(query, "USER ", " ");
+                printf("\t   --  Username: {%s}\n", username);
+                sprintf(tmp, "%s ", username);
+
                 free(subcmd);
-                subcmd = strupr(getBetween(query, "IDENTIFIED ", " "));
+                subcmd = strupr(getBetween(query, tmp, " "));
                 printf("\t   --  [%s]\n", subcmd);
 
-                if (!strcmp(subcmd, "BY"))
+                if (!strcmp(subcmd, "IDENTIFIED"))
                 {
-                    char tmpstr[1024];
-                    password = getBetween(query, "BY ", ";");
-                    printf("\t   --  Password: {%s}\n", password);
+                    free(subcmd);
+                    subcmd = strupr(getBetween(query, "IDENTIFIED ", " "));
+                    printf("\t   --  [%s]\n", subcmd);
 
-                    sprintf(tmpstr, "%s:::%s:::\n", username, password);
-                    appendToFile("users", tmpstr);
+                    if (!strcmp(subcmd, "BY"))
+                    {
+                        char tmpstr[1024];
+                        password = getBetween(query, "BY ", ";");
+                        printf("\t   --  Password: {%s}\n", password);
+
+                        sprintf(tmpstr, "%s:::%s:::\n", username, password);
+                        appendToFile("users", tmpstr);
+                        jalan = 1;
+                    }
+                    else
+                    {
+                        printf("[BY] NOT FOUND\n");
+                    }
                 }
                 else
                 {
-                    printf("[BY] NOT FOUND\n");
+                    printf("[IDENTIFIED] NOT FOUND\n");
                 }
             }
             else
             {
-                printf("[IDENTIFIED] NOT FOUND\n");
+                send(sock, "You don't have permission to access this action.", 1024, 0);
+                jalan = 0;
             }
         }
+        
         /*
         //// CREATE DATABASE ////
         */
@@ -399,6 +435,7 @@ void handleCommand()
         {
             char *databaseName = strlwr(getBetween(query, "DATABASE ", ";"));
             char filepath[str_size];
+            char dbName[str_size];
             sprintf(filepath, "%s/%s", cwd, databaseName);
             printf("\t   --  Database Name: {%s}\n", databaseName);
             printf("\t   --  Filepath : {%s}\n", filepath);
@@ -407,11 +444,14 @@ void handleCommand()
             {
                 printf("\t   Making Database: %s\n", databaseName);
                 mkdir(filepath, 777);
-                appendToFile("databases", databaseName);
+                sprintf(dbName, "%s\n", databaseName);
+                appendToFile("databases", dbName);
+                jalan = 1;
             }
             else
             {
-                printf("\t   DATABASE EXISTS!", databaseName);
+                send(sock, "\t   DATABASE EXISTS!", 1024, 0);
+                jalan = 0;
             }
         }
         /*
@@ -451,6 +491,7 @@ void handleCommand()
 
                     colIndex++;
                 }
+                jalan = 1;
                 // colname = trimString(strtok_r(col, " ", &p));
                 // type = trimString(strtok_r(NULL, " ", &p));
                 // sprintf(header, "%s|%s", col, type);
@@ -458,7 +499,8 @@ void handleCommand()
             }
             else
             {
-                printf("\t      TABLE EXISTS!\n");
+                send(sock, "\t      TABLE EXISTS!\n", 1024, 0);
+                jalan = 0;
             }
         }
 
@@ -475,46 +517,56 @@ void handleCommand()
 
     else if(!strcmp(cmd, "GRANT"))
     {
-        char tmp[str_size], simpan[1024];
-        char *subcmd = strupr(getBetween(query, "GRANT ", " "));
-        printf("\t[%s]\n", subcmd);
-
-        if (!strcmp(subcmd, "PERMISSION"))
+        if(getRoot())
         {
-            char *dbName = strlwr(getBetween(query, "PERMISSION ", " "));
-            // readDatabaseList();
-            if (!getDatabaseList(dbName))
-            {
-                printf("Database not found\n");
-                // exit(1);
-                return;
-            }
-            printf("\t   --  Database Name: {%s}\n", dbName);
+            char tmp[str_size], simpan[1024];
+            char *subcmd = strupr(getBetween(query, "GRANT ", " "));
+            printf("\t[%s]\n", subcmd);
 
-            sprintf(tmp, "%s ", dbName);
-            free(subcmd);
-            subcmd = strupr(getBetween(query, tmp, " "));
-
-            if (!strcmp(subcmd, "INTO"))
+            if (!strcmp(subcmd, "PERMISSION"))
             {
-                char *users = getBetween(query, "INTO ", ";");
-                printf("\t   [%s]\n", subcmd);
-                printf("\t      --  User: {%s}\n", users);
-                // if (checkDatabase(dbName))
-                // {
-                    // printf("\t   Granting Permission to: %s\n", users);
-                    // sprintf(simpan, "%s -> %s", users, dbName);
-                    // appendToFile("permission", simpan);
-                // }
+                char *dbName = strlwr(getBetween(query, "PERMISSION ", " "));
+                // readDatabaseList();
+                if (!getDatabaseList(dbName))
+                {
+                    send(sock, "Database not found\n", 1024, 0);
+                    // exit(1);
+                    jalan = 0;
+                    return;
+                }
+                printf("\t   --  Database Name: {%s}\n", dbName);
+
+                sprintf(tmp, "%s ", dbName);
+                free(subcmd);
+                subcmd = strupr(getBetween(query, tmp, " "));
+
+                if (!strcmp(subcmd, "INTO"))
+                {
+                    char *users = getBetween(query, "INTO ", ";");
+                    printf("\t   [%s]\n", subcmd);
+                    printf("\t      --  User: {%s}\n", users);
+                    // if (checkDatabase(dbName))
+                    // {
+                        // printf("\t   Granting Permission to: %s\n", users);
+                        // sprintf(simpan, "%s -> %s", users, dbName);
+                        // appendToFile("permission", simpan);
+                    // }
+                    
+                    printf("\t   Granting Permission to: %s\n", users);
+                    sprintf(simpan, "%s -> %s", users, dbName);
+                    appendToFile("permission", simpan);
+                    jalan = 1;
+                }
                 
-                printf("\t   Granting Permission to: %s\n", users);
-                sprintf(simpan, "%s -> %s", users, dbName);
-                appendToFile("permission", simpan);
             }
-            
-        }
 
-        free(subcmd);
+            free(subcmd);
+        }
+        else
+        {
+            send(sock, "You don't have permission to access this action.\n", 1024, 0);
+            jalan = 0;
+        }
     }
 
     /*
@@ -531,6 +583,7 @@ void handleCommand()
         printf("\t--  Database Name: {%s}\n", dbName);
         sprintf(currentDB, "%s/%s", cwd, dbName);
         printf("%s\n", currentDB);
+        
     }
 
     /*
@@ -553,6 +606,7 @@ void handleCommand()
             {
                 tableName = strlwr(getBetween(query, "FROM ", ";"));
                 printf("\t   --  Table Name: {%s}\n", tableName);
+                jalan = 1;
             }
             //Where Query Exists
             else
@@ -571,6 +625,7 @@ void handleCommand()
                     printf("\t   [%s]\n", subcmd);
                     printf("\t      --  Column: {%s}\n", col);
                     printf("\t      --  Value: {%s}\n", val);
+                    jalan = 1;
                 }
             }
         }
@@ -594,12 +649,14 @@ void handleCommand()
         {
             char *databaseName = strlwr(getBetween(query, "DATABASE ", ";"));
             printf("\t   --  Database Name: {%s}\n", databaseName);
+            jalan = 1;
         }
         //Dropping Table
         else if (!strcmp(subcmd, "TABLE"))
         {
             char *tableName = strlwr(getBetween(query, "TABLE ", ";"));
             printf("\t   --  Table Name: {%s}\n", tableName);
+            jalan = 1;
         }
         //Dropping Column on a Table
         else if (!strcmp(subcmd, "COLUMN"))
@@ -616,6 +673,7 @@ void handleCommand()
                 char *tableName = strlwr(getBetween(query, "FROM ", ";"));
 
                 printf("\t   --  Table Name: {%s}\n", tableName);
+                jalan = 1;
             }
         }
 
@@ -649,6 +707,7 @@ void handleCommand()
                 printf("\t      --  {%s}\n", val);
                 val = trimString(strtok_r(NULL, ",", &p));
             }
+            jalan = 1;
         }
 
         free(subcmd);
@@ -692,6 +751,7 @@ void handleCommand()
                 printf("\t   [%s]\n", subcmd);
                 printf("\t      --  Column: {%s}\n", col);
                 printf("\t      --  Value: {%s}\n", val);
+                jalan = 1;
             }
 
             free(subcmd);
@@ -726,6 +786,7 @@ void handleCommand()
 
                 printf("\t   --  Column: {%s}\n", col);
                 printf("\t   --  Value: {%s}\n", val);
+                jalan = 1;
             }
             //Where Query Exists
             else
@@ -748,6 +809,7 @@ void handleCommand()
                     printf("\t   [%s]\n", subcmd);
                     printf("\t      --  Column: {%s}\n", col2);
                     printf("\t      --  Value: {%s}\n", val2);
+                    jalan = 1;
                 }
             }
         }
@@ -883,7 +945,7 @@ void *connection_handler(void *socket_desc)
 {
     int loggedin = 0;
     //Get the socket descriptor
-    int sock = *(int *)socket_desc;
+    sock = *(int *)socket_desc;
     int read_size;
     char *message, client_message[1024];
     int ret_val2, ret_val3, status_val;
@@ -893,6 +955,7 @@ void *connection_handler(void *socket_desc)
     bzero(client_message, 1024 * sizeof(client_message[0]));
     //Receive a message from client
     recv(sock, client_message, 1024, 0);
+    strcpy(unpassroot, client_message);
     if(!checkIdentity(client_message))
     {
         send(sock, "User not found", 1024, 0);
@@ -910,8 +973,16 @@ void *connection_handler(void *socket_desc)
 
         if (safe_run(handleCommand))
         {
-            printf("Query Success!\n");
-            send(sock, "Query Success!", 1024, 0);
+            if(jalan == 1)
+            {
+                printf("Query Success!\n");
+                send(sock, "Query Success!", 1024, 0);
+            }
+            else
+            {
+                printf("Query Error!\n");
+                send(sock, "Query Error!", 1024, 0);
+            }
         }
         else
         {

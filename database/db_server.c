@@ -19,6 +19,7 @@ void *connection_handler(void *);
 
 #define _XOPEN_SOURCE 500
 #define str_size 1024
+#define SIZE_BUF 100
 
 struct userStruct
 {
@@ -34,6 +35,50 @@ char queryGlobal[str_size];
 char databases[100][256];
 struct userStruct userList[100];
 char cwd[str_size];
+int jalan = 0;
+int sock;
+char unpassroot[str_size];
+
+int checkIdentity(char idpass[]){
+    FILE *fp = fopen("users", "r");
+
+    const size_t line_size = 300;
+    char* line = malloc(line_size);
+    while (fgets(line, line_size, fp) != NULL)  {
+        // printf("%s ~\n", line);
+        if(!strcmp(idpass, line)) {
+            // printf("KETEMUUUU\n");
+            fclose(fp);
+            return 1;
+        }
+        // printf("GAADA NGAB :(\n");
+    }
+    free(line);
+    return 0;
+}
+
+int getRoot()
+{
+    FILE *fp = fopen("users", "r");
+
+    const size_t line_size = 300;
+    char* line = malloc(line_size);
+    while (fgets(line, line_size, fp) != NULL)  {
+        // printf("%s ~\n", line);
+        if(strcmp(unpassroot, "root:::pass:::\n"))
+        {
+            return 0;
+        }
+        if(!strcmp(unpassroot, line)) {
+            // printf("KETEMUUUU\n");
+            fclose(fp);
+            return 1;
+        }
+        // printf("GAADA NGAB :(\n");
+    }
+    free(line);
+    return 0;
+}
 
 static void sig_handler(int signo)
 {
@@ -110,6 +155,11 @@ void checkFile()
     if (access("users", F_OK))
     {
         FILE *fp = fopen("users", "w+");
+        fclose(fp);
+    }
+    if (access("permission", F_OK))
+    {
+        FILE *fp = fopen("permission", "w+");
         fclose(fp);
     }
 }
@@ -266,13 +316,32 @@ void readDatabaseList()
     while ((read = getline(&line, &len, fp)) != -1)
     {
         line[read - 1] = '\0';
-        sprintf(databases[dbIndex], "%s", line);
+        strcpy(databases[dbIndex], line);
         dbIndex++;
     }
 
     fclose(fp);
     if (line)
         free(line);
+}
+
+int getDatabaseList(char dbName[])
+{
+    FILE *fp = fopen("databases", "r");
+
+    const size_t line_size = 3000;
+    char* line = malloc(line_size);
+    while (fgets(line, line_size, fp) != NULL)  {
+        // printf("%s ~\n", line);
+        if(!strcmp(dbName, line)) {
+            printf("KETEMUUUU\n");
+            fclose(fp);
+            return 1;
+        }
+        printf("GAADA NGAB :(\n");
+    }
+    free(line);
+    return 0;
 }
 
 int insertUser(char *username)
@@ -361,44 +430,54 @@ void handleCommand()
         /*
         //// CREATE USER ////
         */
+        
         if (!strcmp(subcmd, "USER"))
         {
             char *username, *password;
             char tmp[str_size];
-
-            username = getBetween(query, "USER ", " ");
-            printf("\t   --  Username: {%s}\n", username);
-            sprintf(tmp, "%s ", username);
-
-            free(subcmd);
-            subcmd = strupr(getBetween(query, tmp, " "));
-            printf("\t   --  [%s]\n", subcmd);
-
-            if (!strcmp(subcmd, "IDENTIFIED"))
+            if(getRoot())
             {
+                username = getBetween(query, "USER ", " ");
+                printf("\t   --  Username: {%s}\n", username);
+                sprintf(tmp, "%s ", username);
+
                 free(subcmd);
-                subcmd = strupr(getBetween(query, "IDENTIFIED ", " "));
+                subcmd = strupr(getBetween(query, tmp, " "));
                 printf("\t   --  [%s]\n", subcmd);
 
-                if (!strcmp(subcmd, "BY"))
+                if (!strcmp(subcmd, "IDENTIFIED"))
                 {
-                    char tmpstr[1024];
-                    password = getBetween(query, "BY ", ";");
-                    printf("\t   --  Password: {%s}\n", password);
+                    free(subcmd);
+                    subcmd = strupr(getBetween(query, "IDENTIFIED ", " "));
+                    printf("\t   --  [%s]\n", subcmd);
 
-                    sprintf(tmpstr, "%s:::%s:::\n", username, password);
-                    appendToFile("users", tmpstr);
+                    if (!strcmp(subcmd, "BY"))
+                    {
+                        char tmpstr[1024];
+                        password = getBetween(query, "BY ", ";");
+                        printf("\t   --  Password: {%s}\n", password);
+
+                        sprintf(tmpstr, "%s:::%s:::\n", username, password);
+                        appendToFile("users", tmpstr);
+                        jalan = 1;
+                    }
+                    else
+                    {
+                        printf("[BY] NOT FOUND\n");
+                    }
                 }
                 else
                 {
-                    printf("[BY] NOT FOUND\n");
+                    printf("[IDENTIFIED] NOT FOUND\n");
                 }
             }
             else
             {
-                printf("[IDENTIFIED] NOT FOUND\n");
+                send(sock, "You don't have permission to access this action.", 1024, 0);
+                jalan = 0;
             }
         }
+        
         /*
         //// CREATE DATABASE ////
         */
@@ -406,19 +485,23 @@ void handleCommand()
         {
             char *databaseName = strlwr(getBetween(query, "DATABASE ", ";"));
             char filepath[str_size];
+            char dbName[str_size];
             sprintf(filepath, "%s/%s", cwd, databaseName);
-            printf("\t   --  Table Name: {%s}\n", databaseName);
+            printf("\t   --  Database Name: {%s}\n", databaseName);
             printf("\t   --  Filepath : {%s}\n", filepath);
 
             if (!checkDatabase(databaseName))
             {
                 printf("\t   Making Database: %s\n", databaseName);
                 mkdir(filepath, 777);
-                appendToFile("databases", databaseName);
+                sprintf(dbName, "%s\n", databaseName);
+                appendToFile("databases", dbName);
+                jalan = 1;
             }
             else
             {
-                printf("\t   DATABASE EXISTS!", databaseName);
+                send(sock, "\t   DATABASE EXISTS!", 1024, 0);
+                jalan = 0;
             }
         }
         /*
@@ -484,6 +567,87 @@ void handleCommand()
         free(subcmd);
         return 0;
     }
+
+    /*
+
+    //// GRANT PERMISSION COMMAND ////
+    //// GRANT PERMISSION COMMAND ////
+
+    */
+
+    else if(!strcmp(cmd, "GRANT"))
+    {
+        if(getRoot())
+        {
+            char tmp[str_size], simpan[1024];
+            char *subcmd = strupr(getBetween(query, "GRANT ", " "));
+            printf("\t[%s]\n", subcmd);
+
+            if (!strcmp(subcmd, "PERMISSION"))
+            {
+                char *dbName = strlwr(getBetween(query, "PERMISSION ", " "));
+                char namadb[str_size];
+                sprintf(namadb, "%s\n", dbName);
+                // readDatabaseList();
+                if (!getDatabaseList(namadb))
+                {
+                    send(sock, "Database not found\n", 1024, 0);
+                    // exit(1);
+                    jalan = 0;
+                    return;
+                }
+                printf("\t   --  Database Name: {%s}\n", dbName);
+
+                sprintf(tmp, "%s ", dbName);
+                free(subcmd);
+                subcmd = strupr(getBetween(query, tmp, " "));
+
+                if (!strcmp(subcmd, "INTO"))
+                {
+                    char *users = getBetween(query, "INTO ", ";");
+                    printf("\t   [%s]\n", subcmd);
+                    printf("\t      --  User: {%s}\n", users);
+                    // if (checkDatabase(dbName))
+                    // {
+                        // printf("\t   Granting Permission to: %s\n", users);
+                        // sprintf(simpan, "%s -> %s", users, dbName);
+                        // appendToFile("permission", simpan);
+                    // }
+                    
+                    printf("\t   Granting Permission to: %s\n", users);
+                    sprintf(simpan, "%s -> %s", users, dbName);
+                    appendToFile("permission", simpan);
+                    jalan = 1;
+                }
+                
+            }
+
+            free(subcmd);
+        }
+        else
+        {
+            send(sock, "You don't have permission to access this action.\n", 1024, 0);
+            jalan = 0;
+        }
+    }
+
+    /*
+
+    //// USE COMMAND ////
+    //// USE COMMAND ////
+
+    */
+
+    else if(!strcmp(cmd, "USE"))
+    {
+        char tmp[str_size];
+        char *dbName = strlwr(getBetween(query, "USE ", ";"));
+        printf("\t--  Database Name: {%s}\n", dbName);
+        sprintf(currentDB, "%s/%s", cwd, dbName);
+        printf("%s\n", currentDB);
+        
+    }
+
     /*
 
     //// DELETE COMMAND ////
@@ -599,6 +763,7 @@ void handleCommand()
 
         free(subcmd);
     }
+
     /*
 
     //// DROP COMMAND ////
@@ -737,6 +902,7 @@ void handleCommand()
 
         free(subcmd);
     }
+
     /*
 
     //// INSERT COMMAND ////
@@ -789,6 +955,7 @@ void handleCommand()
 
         free(subcmd);
     }
+
     /*
 
     //// SELECT COMMAND ////
@@ -870,78 +1037,6 @@ void handleCommand()
                         printf("\e[32m%s\e[0m", toPrint);
                     }
                 }
-
-                // int colNum = findColIndex(header, columnName);
-                // char *p;
-                // printf("[[%d]]\n", colNum);
-                // char curLine[str_size];
-                // if (colNum != -1)
-                // {
-                //     char tmpPath[str_size];
-                //     sprintf(tmpPath, "%s/%s/tmp", cwd, currentDB);
-                //     printf("\t      --  filepath: {%s}\n", tmpPath);
-                //     FILE *nfile = fopen(tmpPath, "w");
-
-                //     char tmpHeader[str_size];
-                //     memset(tmpHeader, 0, sizeof(tmpHeader));
-                //     char *colVal, colVal2[str_size];
-
-                //     int curNum = 0;
-                //     colVal = trimString(strtok_r(header, ":::", &p));
-                //     while (1)
-                //     {
-                //         printf("\t         --  ColVal: {%s}\n", colVal);
-                //         sprintf(colVal2, "%s", colVal);
-                //         colVal = trimString(strtok_r(NULL, ":::", &p));
-
-                //         if (colVal != NULL)
-                //             sprintf(tmpHeader, "%s%s:::", tmpHeader, colVal2);
-                //         else
-                //         {
-                //             sprintf(tmpHeader, "%s%s", tmpHeader, colVal2);
-                //             break;
-                //         }
-
-                //         curNum++;
-                //     }
-                //     fprintf(nfile, "%s\n", tmpHeader);
-
-                //     char tmpLine[str_size];
-                //     while (fgets(curLine, sizeof(curLine), fp) != NULL)
-                //     {
-                //         memset(tmpLine, 0, sizeof(tmpLine));
-                //         printf("\t      --  Line: {%s}\n", curLine);
-
-                //         int curNum = 0;
-                //         colVal = trimString(strtok_r(curLine, ":::", &p));
-                //         while (1)
-                //         {
-                //             printf("\t         --  ColVal: {%s}\n", colVal);
-                //             sprintf(colVal2, "%s", colVal);
-                //             colVal = trimString(strtok_r(NULL, ":::", &p));
-                //             if (curNum == colNum)
-                //             {
-                //                 sprintf(colVal2, "%s", val);
-                //             }
-                //             if (colVal != NULL)
-                //                 sprintf(tmpLine, "%s%s:::", tmpLine, colVal2);
-                //             else
-                //             {
-                //                 sprintf(tmpLine, "%s%s", tmpLine, colVal2);
-                //                 break;
-                //             }
-
-                //             curNum++;
-                //         }
-
-                //         fprintf(nfile, "%s\n", tmpLine);
-                //     }
-                //     fclose(nfile);
-                //     remove(tablePath);
-                //     rename(tmpPath, tablePath);
-                // }
-
-                // fclose(fp);
             }
         }
         //Where Query Exists
@@ -966,6 +1061,7 @@ void handleCommand()
             free(subcmd);
         }
     }
+
     /*
 
     //// UPDATE COMMAND ////
@@ -1234,9 +1330,6 @@ void handleCommand()
 
 int main(int argc, char *argv[])
 {
-    checkFile();
-    getcwd(cwd, str_size);
-    sprintf(currentDB, "uwukan");
     // DAEMON
     /* Our process ID and Session ID */
     // pid_t pid, sid;
@@ -1276,62 +1369,77 @@ int main(int argc, char *argv[])
 
     // /* The Big Loop */
     // while (1) {
+        checkFile();
+        getcwd(cwd, str_size);
+        strcpy(currentDB, "uwukan");
+        int socket_desc, client_sock, c, *new_sock;
+        struct sockaddr_in server, client;
 
-    int socket_desc, client_sock, c, *new_sock;
-    struct sockaddr_in server, client;
-
-    //Create socket
-    socket_desc = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_desc == -1)
-    {
-        printf("Could not create socket");
-    }
-    puts("Socket created");
-
-    //Prepare the sockaddr_in structure
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = htons(7000);
-
-    //Bind
-    if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
-    {
-        //print the error message
-        perror("Bind failed. Error");
-        return 1;
-    }
-    puts("Bind done");
-
-    //Listen
-    listen(socket_desc, 3);
-
-    //Accept and incoming connection
-    puts("Waiting for incoming connections...");
-    c = sizeof(struct sockaddr_in);
-    while ((client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c)))
-    {
-        puts("Connection accepted");
-
-        pthread_t sniffer_thread;
-        new_sock = malloc(1);
-        *new_sock = client_sock;
-
-        if (pthread_create(&sniffer_thread, NULL, connection_handler, (void *)new_sock) < 0)
+        //Create socket
+        socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+        if (socket_desc == -1)
         {
-            perror("Could not create thread");
+            printf("Could not create socket");
+        }
+        puts("Socket created");
+
+        //Prepare the sockaddr_in structure
+        server.sin_family = AF_INET;
+        server.sin_addr.s_addr = INADDR_ANY;
+        server.sin_port = htons(7000);
+
+        //Bind
+        if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
+        {
+            //print the error message
+            perror("Bind failed. Error");
             return 1;
         }
+        puts("Bind done");
 
-        //Now join the thread , so that we dont terminate before the thread
-        pthread_join(sniffer_thread, NULL);
-        puts("Handler assigned");
-    }
+        //Listen
+        listen(socket_desc, 3);
 
-    if (client_sock < 0)
-    {
-        perror("accept failed");
-        return 1;
-    }
+        //Accept and incoming connection
+        puts("Waiting for incoming connections...");
+        c = sizeof(struct sockaddr_in);
+        while ((client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c)))
+        {
+            puts("Connection accepted");
+
+            // Waits for incoming message from client.
+        // ret_val2 = recv(sock, id, sizeof(id), 0);
+        // ret_val3 = recv(sock, password, sizeof(password), 0);
+        // if(!checkIdentity(id, password))
+        //     status_val = send(sock,
+        //         "wrongpass", SIZE_BUF, 0);
+        // else {
+        //     loggedin = 1;
+        //     status_val = send(sock,
+        //                     "regloginsuccess", SIZE_BUF, 0);
+        //     sprintf(idpass, "%s:%s", id, password);
+        // }
+
+            pthread_t sniffer_thread;
+            new_sock = malloc(1);
+            *new_sock = client_sock;
+
+            if (pthread_create(&sniffer_thread, NULL, connection_handler, (void *)new_sock) < 0)
+            {
+                perror("Could not create thread");
+                return 1;
+            }
+
+            //Now join the thread , so that we dont terminate before the thread
+            pthread_join(sniffer_thread, NULL);
+            puts("Handler assigned");
+        }
+
+        if (client_sock < 0)
+        {
+            perror("accept failed");
+            return 1;
+        }
     //     sleep(30); /* wait 30 seconds */
     //     break;
     // }
@@ -1345,21 +1453,46 @@ int main(int argc, char *argv[])
  * */
 void *connection_handler(void *socket_desc)
 {
+    int loggedin = 0;
     //Get the socket descriptor
-    int sock = *(int *)socket_desc;
+    sock = *(int *)socket_desc;
     int read_size;
     char *message, client_message[1024];
+    int ret_val2, ret_val3, status_val;
+    char id[SIZE_BUF], password[SIZE_BUF];
+    char idpass[256];
 
     bzero(client_message, 1024 * sizeof(client_message[0]));
     //Receive a message from client
+    recv(sock, client_message, 1024, 0);
+    strcpy(unpassroot, client_message);
+    if(!checkIdentity(client_message))
+    {
+        send(sock, "User not found", 1024, 0);
+        printf("User not found\n");
+    }
     while ((read_size = recv(sock, client_message, 1024, 0)) > 0)
     {
+        if (strlen(client_message) == 0 || !(client_message[0] >= 33 && client_message[0] <= 126))
+        {
+            continue;
+        }
+
         printf("%s\n", client_message);
         sprintf(queryGlobal, "%s", client_message);
-        // handleCommand();
+
         if (safe_run(handleCommand))
         {
-            //
+            if(jalan == 1)
+            {
+                printf("Query Success!\n");
+                send(sock, "Query Success!", 1024, 0);
+            }
+            else
+            {
+                printf("Query Error!\n");
+                send(sock, "Query Error!", 1024, 0);
+            }
         }
         else
         {
@@ -1367,11 +1500,10 @@ void *connection_handler(void *socket_desc)
             send(sock, "Query Error!", 1024, 0);
         }
         printf("\n\n");
-        write(sock, client_message, strlen(client_message));
+        // write(sock, client_message, strlen(client_message));
         bzero(client_message, 1024 * sizeof(client_message[0]));
         bzero(message, 1024 * sizeof(message[0]));
     }
-
     if (read_size == 0)
     {
         puts("Client Disconnected\n");

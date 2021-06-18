@@ -851,26 +851,119 @@ void handleCommand()
 
         if (!strcmp(subcmd, "SET"))
         {
-            char *toChange = getBetween(query, "SET ", " ");
+            char *toChange = getBetween(query, "SET ", " WHERE");
 
             //No Where Query
             if (toChange == NULL)
             {
                 toChange = strlwr(getBetween(query, "SET ", ";"));
-                char *col = getBetween(toChange, NULL, "=");
+                char *columnName = getBetween(toChange, NULL, "=");
                 char *val = removeQuotes(getBetween(toChange, "=", NULL));
 
-                printf("\t   --  Column: {%s}\n", col);
+                printf("\t   --  Column: {%s}\n", columnName);
                 printf("\t   --  Value: {%s}\n", val);
+
+                sprintf(tmp, "%s ", columnName);
+                free(subcmd);
+                subcmd = strupr(getBetween(query, tmp, " "));
+
+                printf("\t   --  Table Name: {%s}\n", tableName);
+                char tablePath[str_size], header[str_size];
+                sprintf(tablePath, "%s/%s/%s", cwd, currentDB, tableName);
+                if (access(tablePath, F_OK))
+                {
+                    printf("TABLE DOES NOT EXIST!");
+                }
+                else
+                {
+                    printf("\t      --  Filepath: {%s}\n", tablePath);
+
+                    FILE *fp = fopen(tablePath, "r");
+                    fgets(header, sizeof(header), fp);
+                    printf("\t      --  Header: {%s}\n", header);
+
+                    int colNum = findColIndex(header, columnName);
+                    char *p;
+                    printf("[[%d]]\n", colNum);
+                    char curLine[str_size];
+                    if (colNum != -1)
+                    {
+                        char tmpPath[str_size];
+                        sprintf(tmpPath, "%s/%s/tmp", cwd, currentDB);
+                        printf("\t      --  filepath: {%s}\n", tmpPath);
+                        FILE *nfile = fopen(tmpPath, "w");
+
+                        char tmpHeader[str_size];
+                        memset(tmpHeader, 0, sizeof(tmpHeader));
+                        char *colVal, colVal2[str_size];
+
+                        int curNum = 0;
+                        colVal = trimString(strtok_r(header, ":::", &p));
+                        while (1)
+                        {
+                            printf("\t         --  ColVal: {%s}\n", colVal);
+                            sprintf(colVal2, "%s", colVal);
+                            colVal = trimString(strtok_r(NULL, ":::", &p));
+
+                            if (colVal != NULL)
+                                sprintf(tmpHeader, "%s%s:::", tmpHeader, colVal2);
+                            else
+                            {
+                                sprintf(tmpHeader, "%s%s", tmpHeader, colVal2);
+                                break;
+                            }
+
+                            curNum++;
+                        }
+                        fprintf(nfile, "%s\n", tmpHeader);
+
+                        char tmpLine[str_size];
+                        while (fgets(curLine, sizeof(curLine), fp) != NULL)
+                        {
+                            memset(tmpLine, 0, sizeof(tmpLine));
+                            printf("\t      --  Line: {%s}\n", curLine);
+
+                            int curNum = 0;
+                            colVal = trimString(strtok_r(curLine, ":::", &p));
+                            while (1)
+                            {
+                                printf("\t         --  ColVal: {%s}\n", colVal);
+                                sprintf(colVal2, "%s", colVal);
+                                colVal = trimString(strtok_r(NULL, ":::", &p));
+                                if (curNum == colNum)
+                                {
+                                    sprintf(colVal2, "%s", val);
+                                }
+                                if (colVal != NULL)
+                                    sprintf(tmpLine, "%s%s:::", tmpLine, colVal2);
+                                else
+                                {
+                                    sprintf(tmpLine, "%s%s", tmpLine, colVal2);
+                                    break;
+                                }
+
+                                curNum++;
+                            }
+
+                            fprintf(nfile, "%s\n", tmpLine);
+                        }
+                        fclose(nfile);
+                        remove(tablePath);
+                        rename(tmpPath, tablePath);
+                    }
+
+                    fclose(fp);
+                }
             }
             //Where Query Exists
             else
             {
                 sprintf(tmp, "%s ", toChange);
-                char *col1 = getBetween(toChange, NULL, "=");
+                printf("TMP %s\n", tmp);
+                char *columnName = getBetween(toChange, NULL, "=");
                 char *val1 = removeQuotes(getBetween(toChange, "=", NULL));
 
-                printf("\t   --  Column: {%s}\n", col1);
+                printf("\t   --  Column: {%s}\n", columnName);
                 printf("\t   --  Value: {%s}\n", val1);
 
                 free(subcmd);
@@ -884,6 +977,120 @@ void handleCommand()
                     printf("\t   [%s]\n", subcmd);
                     printf("\t      --  Column: {%s}\n", col2);
                     printf("\t      --  Value: {%s}\n", val2);
+
+                    sprintf(tmp, "%s ", columnName);
+                    free(subcmd);
+                    subcmd = strupr(getBetween(query, tmp, " "));
+
+                    printf("\t   --  Table Name: {%s}\n", tableName);
+                    char tablePath[str_size], header[str_size];
+                    sprintf(tablePath, "%s/%s/%s", cwd, currentDB, tableName);
+                    if (access(tablePath, F_OK))
+                    {
+                        printf("TABLE DOES NOT EXIST!");
+                    }
+                    else
+                    {
+                        printf("\t      --  Filepath: {%s}\n", tablePath);
+
+                        FILE *fp = fopen(tablePath, "r");
+                        fgets(header, sizeof(header), fp);
+                        printf("\t      --  Header: {%s}\n", header);
+
+                        int colNum = findColIndex(header, columnName);
+                        char *p;
+                        printf("[[%d]]\n", colNum);
+                        char curLine[str_size];
+                        if (colNum != -1)
+                        {
+                            char tmpPath[str_size];
+                            sprintf(tmpPath, "%s/%s/tmp", cwd, currentDB);
+                            printf("\t      --  filepath: {%s}\n", tmpPath);
+                            FILE *nfile = fopen(tmpPath, "w");
+
+                            char tmpHeader[str_size];
+                            memset(tmpHeader, 0, sizeof(tmpHeader));
+                            char *colVal, colVal2[str_size];
+
+                            int curNum = 0;
+                            colVal = trimString(strtok_r(header, ":::", &p));
+                            while (1)
+                            {
+                                printf("\t         --  ColVal: {%s}\n", colVal);
+                                sprintf(colVal2, "%s", colVal);
+                                colVal = trimString(strtok_r(NULL, ":::", &p));
+
+                                if (colVal != NULL)
+                                    sprintf(tmpHeader, "%s%s:::", tmpHeader, colVal2);
+                                else
+                                {
+                                    sprintf(tmpHeader, "%s%s", tmpHeader, colVal2);
+                                    break;
+                                }
+
+                                curNum++;
+                            }
+                            fprintf(nfile, "%s\n", tmpHeader);
+
+                            char tmpLine[str_size], curLineCopy[str_size];
+                            int found;
+                            while (fgets(curLine, sizeof(curLine), fp) != NULL)
+                            {
+                                found = 0;
+                                memset(tmpLine, 0, sizeof(tmpLine));
+                                sprintf(curLineCopy, "%s", curLine);
+                                printf("\t      --  Line: {%s}\n", curLine);
+
+                                int curNum = 0;
+                                colVal = trimString(strtok_r(curLineCopy, ":::", &p));
+                                while (1)
+                                {
+                                    printf("\t         --  ColVal: {%s}\n", colVal);
+                                    sprintf(colVal2, "%s", colVal);
+                                    colVal = trimString(strtok_r(NULL, ":::", &p));
+                                    if (!strcmp(colVal2, val2))
+                                    {
+                                        found = 1;
+                                        printf("FOUND!\n");
+                                        break;
+                                    }
+                                    if (colVal == NULL)
+                                        break;
+
+                                    curNum++;
+                                }
+
+                                curNum = 0;
+                                colVal = trimString(strtok_r(curLine, ":::", &p));
+                                while (1)
+                                {
+                                    printf("\t         --  ColVal: {%s}\n", colVal);
+                                    sprintf(colVal2, "%s", colVal);
+                                    colVal = trimString(strtok_r(NULL, ":::", &p));
+                                    if (curNum == colNum && found)
+                                    {
+                                        sprintf(colVal2, "%s", val1);
+                                    }
+                                    if (colVal != NULL)
+                                        sprintf(tmpLine, "%s%s:::", tmpLine, colVal2);
+                                    else
+                                    {
+                                        sprintf(tmpLine, "%s%s", tmpLine, colVal2);
+                                        break;
+                                    }
+
+                                    curNum++;
+                                }
+
+                                fprintf(nfile, "%s\n", tmpLine);
+                            }
+                            fclose(nfile);
+                            remove(tablePath);
+                            rename(tmpPath, tablePath);
+                        }
+
+                        fclose(fp);
+                    }
                 }
             }
         }

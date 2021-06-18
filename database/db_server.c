@@ -526,8 +526,10 @@ void handleCommand()
             if (!strcmp(subcmd, "PERMISSION"))
             {
                 char *dbName = strlwr(getBetween(query, "PERMISSION ", " "));
+                char namadb[str_size];
+                sprintf(namadb, "%s\n", dbName);
                 // readDatabaseList();
-                if (!getDatabaseList(dbName))
+                if (!getDatabaseList(namadb))
                 {
                     send(sock, "Database not found\n", 1024, 0);
                     // exit(1);

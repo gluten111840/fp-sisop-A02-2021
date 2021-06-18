@@ -3,6 +3,7 @@
 #include <sys/socket.h> //socket
 #include <arpa/inet.h>	//inet_addr
 #include <unistd.h>
+#include <wait.h>
 #include <ctype.h>
 #include <stdlib.h>
 
@@ -24,6 +25,7 @@ int main(int argc, char *argv[])
 	struct sockaddr_in server;
 	char uname[1024], pswrd[1024], unpass[30000];
 	char message[1024], server_reply[1024];
+	int tunggu;
 	//Create socket
 	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if(!getuid())
@@ -53,17 +55,26 @@ int main(int argc, char *argv[])
 		printf("Copyright (c) 2021, A02 Berdua Doang.\n\n");
 		printf("Press ctrl + c to force stop.\n\n");
 
+		/* TO DO
+		TAMBAHIN CODE BUAT KIRIM AUTENTIKASI KE SERVER DISINI
+		BIAR SERVER BISA BEDAIN SUDO ATAU ENGGA
+		*/
+
+		if (server_reply == "User not found")
+		{
+			printf("Login failed!\n");
+			exit(1);
+		}
 		int root = 0;
 		//keep communicating with server
 		int commandTrue = 0;
 		while (1)
 		{
-			root = 1;
 			printf("A02DB[root] >> ");
 			fgets(message, sizeof(message), stdin);
 
 			//Send some data
-			if (send(sock, message, strlen(message), 0) < 0)
+			if (send(sock, message, 1024, 0) < 0)
 			{
 				puts("Send failed");
 				return 1;
@@ -72,13 +83,14 @@ int main(int argc, char *argv[])
 			//Receive a reply from the server
 			if (recv(sock, server_reply, 1024, 0) < 0)
 			{
-				puts("Recv failed");
+				puts("recv failed");
 				break;
 			}
 
 			puts("Server reply :");
 			puts(server_reply);
 			memset(&server_reply, '\0', sizeof(server_reply));
+			
 		}
 	}
 	else
@@ -117,7 +129,9 @@ int main(int argc, char *argv[])
 		strcpy(pswrd, argv[4]);
 		sprintf(unpass, "%s:::%s:::\n", uname, pswrd);
 		send(sock, unpass, sizeof(unpass), 0);
-		if (recv(sock, server_reply, 1024, 0) < 0)
+		while((wait(&tunggu)) > 0);
+		recv(sock, server_reply, 1024, 0);
+		if (strcmp(server_reply, "User not found")==0)
 		{
 			printf("Login failed!\n");
 			exit(1);

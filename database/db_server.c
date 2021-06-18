@@ -34,18 +34,21 @@ char databases[100][256];
 struct userStruct userList[100];
 char cwd[str_size];
 
-int checkIdentity(char id[], char password[]){
-    char akun[1000], temp[100];
+int checkIdentity(char idpass[]){
     FILE *fp = fopen("users", "r");
-    // Loop per line
-    while(fscanf(fp, "%s", temp) == 1){
-        // Cek apakah id:password sudah ada.
-        if(strstr(temp, akun)!=0) {
-                fclose(fp);
-                return 1;
+
+    const size_t line_size = 300;
+    char* line = malloc(line_size);
+    while (fgets(line, line_size, fp) != NULL)  {
+        // printf("%s ~\n", line);
+        if(!strcmp(idpass, line)) {
+            printf("KETEMUUUU\n");
+            fclose(fp);
+            return 1;
         }
+        printf("GAADA NGAB :(\n");
     }
-    fclose(fp);
+    free(line);
     return 0;
 }
 
@@ -109,6 +112,11 @@ void checkFile()
     if (access("users", F_OK))
     {
         FILE *fp = fopen("users", "w+");
+        fclose(fp);
+    }
+    if (access("permission", F_OK))
+    {
+        FILE *fp = fopen("permission", "w+");
         fclose(fp);
     }
 }
@@ -265,6 +273,25 @@ void readDatabaseList()
         free(line);
 }
 
+int getDatabaseList(char dbName[])
+{
+    FILE *fp = fopen("databases", "r");
+
+    const size_t line_size = 300;
+    char* line = malloc(line_size);
+    while (fgets(line, line_size, fp) != NULL)  {
+        // printf("%s ~\n", line);
+        if(!strcmp(dbName, line)) {
+            printf("KETEMUUUU\n");
+            fclose(fp);
+            return 1;
+        }
+        printf("GAADA NGAB :(\n");
+    }
+    free(line);
+    return 0;
+}
+
 int insertUser(char *username)
 {
     int i = dbIndex;
@@ -373,7 +400,7 @@ void handleCommand()
             char *databaseName = strlwr(getBetween(query, "DATABASE ", ";"));
             char filepath[str_size];
             sprintf(filepath, "%s/%s", cwd, databaseName);
-            printf("\t   --  Table Name: {%s}\n", databaseName);
+            printf("\t   --  Database Name: {%s}\n", databaseName);
             printf("\t   --  Filepath : {%s}\n", filepath);
 
             if (!checkDatabase(databaseName))
@@ -438,6 +465,74 @@ void handleCommand()
         free(subcmd);
         return 0;
     }
+
+    /*
+
+    //// GRANT PERMISSION COMMAND ////
+    //// GRANT PERMISSION COMMAND ////
+
+    */
+
+    else if(!strcmp(cmd, "GRANT"))
+    {
+        char tmp[str_size], simpan[1024];
+        char *subcmd = strupr(getBetween(query, "GRANT ", " "));
+        printf("\t[%s]\n", subcmd);
+
+        if (!strcmp(subcmd, "PERMISSION"))
+        {
+            char *dbName = strlwr(getBetween(query, "PERMISSION ", " "));
+            // readDatabaseList();
+            if (!getDatabaseList(dbName))
+            {
+                printf("Database not found\n");
+                // exit(1);
+                return;
+            }
+            printf("\t   --  Database Name: {%s}\n", dbName);
+
+            sprintf(tmp, "%s ", dbName);
+            free(subcmd);
+            subcmd = strupr(getBetween(query, tmp, " "));
+
+            if (!strcmp(subcmd, "INTO"))
+            {
+                char *users = getBetween(query, "INTO ", ";");
+                printf("\t   [%s]\n", subcmd);
+                printf("\t      --  User: {%s}\n", users);
+                // if (checkDatabase(dbName))
+                // {
+                    // printf("\t   Granting Permission to: %s\n", users);
+                    // sprintf(simpan, "%s -> %s", users, dbName);
+                    // appendToFile("permission", simpan);
+                // }
+                
+                printf("\t   Granting Permission to: %s\n", users);
+                sprintf(simpan, "%s -> %s", users, dbName);
+                appendToFile("permission", simpan);
+            }
+            
+        }
+
+        free(subcmd);
+    }
+
+    /*
+
+    //// USE COMMAND ////
+    //// USE COMMAND ////
+
+    */
+
+    else if(!strcmp(cmd, "USE"))
+    {
+        char tmp[str_size];
+        char *dbName = strlwr(getBetween(query, "USE ", ";"));
+        printf("\t--  Database Name: {%s}\n", dbName);
+        sprintf(currentDB, "%s/%s", cwd, dbName);
+        printf("%s\n", currentDB);
+    }
+
     /*
 
     //// DELETE COMMAND ////
@@ -797,6 +892,12 @@ void *connection_handler(void *socket_desc)
 
     bzero(client_message, 1024 * sizeof(client_message[0]));
     //Receive a message from client
+    recv(sock, client_message, 1024, 0);
+    if(!checkIdentity(client_message))
+    {
+        send(sock, "User not found", 1024, 0);
+        printf("User not found\n");
+    }
     while ((read_size = recv(sock, client_message, 1024, 0)) > 0)
     {
         if (strlen(client_message) == 0 || !(client_message[0] >= 33 && client_message[0] <= 126))

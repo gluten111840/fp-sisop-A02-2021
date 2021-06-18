@@ -3,8 +3,9 @@
 #include <stdlib.h> //strlen
 #include <sys/socket.h>
 #include <arpa/inet.h> //inet_addr
-#include <unistd.h>    //write
-#include <pthread.h>   //for threading , link with lpthread
+#include <ftw.h>
+#include <unistd.h>  //write
+#include <pthread.h> //for threading , link with lpthread
 #include <wait.h>
 #include <ctype.h>
 #include <fcntl.h>
@@ -16,8 +17,8 @@
 
 void *connection_handler(void *);
 
+#define _XOPEN_SOURCE 500
 #define str_size 1024
-#define SIZE_BUF 100
 
 struct userStruct
 {
@@ -33,50 +34,6 @@ char queryGlobal[str_size];
 char databases[100][256];
 struct userStruct userList[100];
 char cwd[str_size];
-int jalan = 0;
-int sock;
-char unpassroot[str_size];
-
-int checkIdentity(char idpass[]){
-    FILE *fp = fopen("users", "r");
-
-    const size_t line_size = 300;
-    char* line = malloc(line_size);
-    while (fgets(line, line_size, fp) != NULL)  {
-        // printf("%s ~\n", line);
-        if(!strcmp(idpass, line)) {
-            // printf("KETEMUUUU\n");
-            fclose(fp);
-            return 1;
-        }
-        // printf("GAADA NGAB :(\n");
-    }
-    free(line);
-    return 0;
-}
-
-int getRoot()
-{
-    FILE *fp = fopen("users", "r");
-
-    const size_t line_size = 300;
-    char* line = malloc(line_size);
-    while (fgets(line, line_size, fp) != NULL)  {
-        // printf("%s ~\n", line);
-        if(strcmp(unpassroot, "root:::pass:::\n"))
-        {
-            return 0;
-        }
-        if(!strcmp(unpassroot, line)) {
-            // printf("KETEMUUUU\n");
-            fclose(fp);
-            return 1;
-        }
-        // printf("GAADA NGAB :(\n");
-    }
-    free(line);
-    return 0;
-}
 
 static void sig_handler(int signo)
 {
@@ -119,6 +76,21 @@ static int safe_run(func_t func)
     return 1;
 }
 
+int unlink_cb(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf)
+{
+    int rv = remove(fpath);
+
+    if (rv)
+        perror(fpath);
+
+    return rv;
+}
+
+int rmrf(char *path)
+{
+    return nftw(path, unlink_cb, 64, 8 | 1);
+}
+
 void mkfile(char *filename)
 {
     if (access(filename, F_OK))
@@ -138,11 +110,6 @@ void checkFile()
     if (access("users", F_OK))
     {
         FILE *fp = fopen("users", "w+");
-        fclose(fp);
-    }
-    if (access("permission", F_OK))
-    {
-        FILE *fp = fopen("permission", "w+");
         fclose(fp);
     }
 }
@@ -258,6 +225,15 @@ char *getBetween(char *str, char *leftStr, char *rightStr)
     }
 }
 
+char *removeQuotes(char *str)
+{
+    if (str[0] == '\'')
+        str++;
+    if (str[strlen(str) - 1] == '\'')
+        str[strlen(str) - 1] = '\0';
+    return str;
+}
+
 int checkDatabase(char *databaseName)
 {
     int i = dbIndex;
@@ -290,32 +266,13 @@ void readDatabaseList()
     while ((read = getline(&line, &len, fp)) != -1)
     {
         line[read - 1] = '\0';
-        strcpy(databases[dbIndex], line);
+        sprintf(databases[dbIndex], "%s", line);
         dbIndex++;
     }
 
     fclose(fp);
     if (line)
         free(line);
-}
-
-int getDatabaseList(char dbName[])
-{
-    FILE *fp = fopen("databases", "r");
-
-    const size_t line_size = 3000;
-    char* line = malloc(line_size);
-    while (fgets(line, line_size, fp) != NULL)  {
-        // printf("%s ~\n", line);
-        if(!strcmp(dbName, line)) {
-            printf("KETEMUUUU\n");
-            fclose(fp);
-            return 1;
-        }
-        printf("GAADA NGAB :(\n");
-    }
-    free(line);
-    return 0;
 }
 
 int insertUser(char *username)
@@ -342,7 +299,7 @@ void readUsernameList()
     while ((read = getline(&line, &len, fp)) != -1)
     {
         line[read - 1] = '\0';
-        strcpy(databases[dbIndex], line);
+        sprintf(databases[dbIndex], "%s", line);
         dbIndex++;
     }
 
@@ -351,13 +308,37 @@ void readUsernameList()
         free(line);
 }
 
-char *removeQuotes(char *str)
+int findColIndex(char *header, char *columnName)
 {
-    if (str[0] == '\'')
-        str++;
-    if (str[strlen(str) - 1] == '\'')
-        str[strlen(str) - 1] = '\0';
-    return str;
+    char curCol[100][str_size];
+    char tmpHead[str_size];
+    sprintf(tmpHead, "%s", header);
+    int index = 0;
+    char *p, *tmp = trimString(strtok_r(tmpHead, ":::", &p));
+    sprintf(curCol[index], "%s", tmp);
+    index++;
+
+    while (1)
+    {
+        tmp = trimString(strtok_r(NULL, ":::", &p));
+        if (tmp == NULL)
+            break;
+
+        sprintf(curCol[index], "%s", tmp);
+        index++;
+    }
+
+    char *colname, *type;
+    while (index--)
+    {
+        colname = trimString(strtok_r(curCol[index], "|", &p));
+        type = trimString(strtok_r(NULL, "|", &p));
+
+        if (!strcmp(colname, columnName))
+            return index;
+    }
+
+    return -1;
 }
 
 void handleCommand()
@@ -380,54 +361,44 @@ void handleCommand()
         /*
         //// CREATE USER ////
         */
-        
         if (!strcmp(subcmd, "USER"))
         {
             char *username, *password;
             char tmp[str_size];
-            if(getRoot())
-            {
-                username = getBetween(query, "USER ", " ");
-                printf("\t   --  Username: {%s}\n", username);
-                sprintf(tmp, "%s ", username);
 
+            username = getBetween(query, "USER ", " ");
+            printf("\t   --  Username: {%s}\n", username);
+            sprintf(tmp, "%s ", username);
+
+            free(subcmd);
+            subcmd = strupr(getBetween(query, tmp, " "));
+            printf("\t   --  [%s]\n", subcmd);
+
+            if (!strcmp(subcmd, "IDENTIFIED"))
+            {
                 free(subcmd);
-                subcmd = strupr(getBetween(query, tmp, " "));
+                subcmd = strupr(getBetween(query, "IDENTIFIED ", " "));
                 printf("\t   --  [%s]\n", subcmd);
 
-                if (!strcmp(subcmd, "IDENTIFIED"))
+                if (!strcmp(subcmd, "BY"))
                 {
-                    free(subcmd);
-                    subcmd = strupr(getBetween(query, "IDENTIFIED ", " "));
-                    printf("\t   --  [%s]\n", subcmd);
+                    char tmpstr[1024];
+                    password = getBetween(query, "BY ", ";");
+                    printf("\t   --  Password: {%s}\n", password);
 
-                    if (!strcmp(subcmd, "BY"))
-                    {
-                        char tmpstr[1024];
-                        password = getBetween(query, "BY ", ";");
-                        printf("\t   --  Password: {%s}\n", password);
-
-                        sprintf(tmpstr, "%s:::%s:::\n", username, password);
-                        appendToFile("users", tmpstr);
-                        jalan = 1;
-                    }
-                    else
-                    {
-                        printf("[BY] NOT FOUND\n");
-                    }
+                    sprintf(tmpstr, "%s:::%s:::\n", username, password);
+                    appendToFile("users", tmpstr);
                 }
                 else
                 {
-                    printf("[IDENTIFIED] NOT FOUND\n");
+                    printf("[BY] NOT FOUND\n");
                 }
             }
             else
             {
-                send(sock, "You don't have permission to access this action.", 1024, 0);
-                jalan = 0;
+                printf("[IDENTIFIED] NOT FOUND\n");
             }
         }
-        
         /*
         //// CREATE DATABASE ////
         */
@@ -435,23 +406,19 @@ void handleCommand()
         {
             char *databaseName = strlwr(getBetween(query, "DATABASE ", ";"));
             char filepath[str_size];
-            char dbName[str_size];
             sprintf(filepath, "%s/%s", cwd, databaseName);
-            printf("\t   --  Database Name: {%s}\n", databaseName);
+            printf("\t   --  Table Name: {%s}\n", databaseName);
             printf("\t   --  Filepath : {%s}\n", filepath);
 
             if (!checkDatabase(databaseName))
             {
                 printf("\t   Making Database: %s\n", databaseName);
                 mkdir(filepath, 777);
-                sprintf(dbName, "%s\n", databaseName);
-                appendToFile("databases", dbName);
-                jalan = 1;
+                appendToFile("databases", databaseName);
             }
             else
             {
-                send(sock, "\t   DATABASE EXISTS!", 1024, 0);
-                jalan = 0;
+                printf("\t   DATABASE EXISTS!", databaseName);
             }
         }
         /*
@@ -467,127 +434,56 @@ void handleCommand()
             char *columns = strlwr(getBetween(query, tmp, ");"));
 
             char *p = NULL;
-            char col[100], *colname, *type, *tmpsave;
+            char col[100][str_size], *colname, *type, *tmpsave;
 
             sprintf(filepath, "%s/%s/%s", cwd, currentDB, tableName);
             memset(header, 0, sizeof(header));
+
             if (access(filepath, F_OK))
             {
-                printf("\t   --  Filepath: %s\n");
-                printf("\t      --  Columns: \n");
+                printf("\t   --  Filepath: %s\n", filepath);
+                printf("\t      --  Columns: %s\n", columns);
                 mkfile(filepath);
 
                 int colIndex = 0;
-                while (1)
+                tmpsave = trimString(strtok_r(columns, ",", &p));
+                // printf("\t         --  %s\n", tmpsave);
+                sprintf(col[colIndex], "%s", tmpsave);
+                colIndex++;
+
+                while (tmpsave != NULL)
                 {
                     tmpsave = trimString(strtok_r(NULL, ",", &p));
+
                     if (tmpsave != NULL)
-                    {
-                        printf("\t         --  %s\n", tmpsave);
-                        strcpy(col[colIndex], tmpsave);
-                    }
-                    else
-                        break;
+                        sprintf(col[colIndex], "%s", tmpsave);
 
                     colIndex++;
                 }
-                jalan = 1;
-                // colname = trimString(strtok_r(col, " ", &p));
-                // type = trimString(strtok_r(NULL, " ", &p));
-                // sprintf(header, "%s|%s", col, type);
-                // appendToFile(filepath, header);
+                colIndex--;
+
+                for (int i = 0; i < colIndex - 1; i++)
+                {
+                    printf("\t         --  %s\n", col[i]);
+                    colname = trimString(strtok_r(col[i], " ", &p));
+                    type = trimString(strtok_r(NULL, " ", &p));
+                    sprintf(header, "%s%s|%s:::", header, colname, type);
+                }
+                colname = trimString(strtok_r(col[colIndex - 1], " ", &p));
+                type = trimString(strtok_r(NULL, " ", &p));
+                sprintf(header, "%s%s|%s", header, colname, type);
+                // printf("%s", header);
+                appendToFile(filepath, header);
             }
             else
             {
-                send(sock, "\t      TABLE EXISTS!\n", 1024, 0);
-                jalan = 0;
+                printf("\t      TABLE EXISTS!\n");
             }
         }
 
         free(subcmd);
         return 0;
     }
-
-    /*
-
-    //// GRANT PERMISSION COMMAND ////
-    //// GRANT PERMISSION COMMAND ////
-
-    */
-
-    else if(!strcmp(cmd, "GRANT"))
-    {
-        if(getRoot())
-        {
-            char tmp[str_size], simpan[1024];
-            char *subcmd = strupr(getBetween(query, "GRANT ", " "));
-            printf("\t[%s]\n", subcmd);
-
-            if (!strcmp(subcmd, "PERMISSION"))
-            {
-                char *dbName = strlwr(getBetween(query, "PERMISSION ", " "));
-                char namadb[str_size];
-                sprintf(namadb, "%s\n", dbName);
-                // readDatabaseList();
-                if (!getDatabaseList(namadb))
-                {
-                    send(sock, "Database not found\n", 1024, 0);
-                    // exit(1);
-                    jalan = 0;
-                    return;
-                }
-                printf("\t   --  Database Name: {%s}\n", dbName);
-
-                sprintf(tmp, "%s ", dbName);
-                free(subcmd);
-                subcmd = strupr(getBetween(query, tmp, " "));
-
-                if (!strcmp(subcmd, "INTO"))
-                {
-                    char *users = getBetween(query, "INTO ", ";");
-                    printf("\t   [%s]\n", subcmd);
-                    printf("\t      --  User: {%s}\n", users);
-                    // if (checkDatabase(dbName))
-                    // {
-                        // printf("\t   Granting Permission to: %s\n", users);
-                        // sprintf(simpan, "%s -> %s", users, dbName);
-                        // appendToFile("permission", simpan);
-                    // }
-                    
-                    printf("\t   Granting Permission to: %s\n", users);
-                    sprintf(simpan, "%s -> %s", users, dbName);
-                    appendToFile("permission", simpan);
-                    jalan = 1;
-                }
-                
-            }
-
-            free(subcmd);
-        }
-        else
-        {
-            send(sock, "You don't have permission to access this action.\n", 1024, 0);
-            jalan = 0;
-        }
-    }
-
-    /*
-
-    //// USE COMMAND ////
-    //// USE COMMAND ////
-
-    */
-
-    else if(!strcmp(cmd, "USE"))
-    {
-        char tmp[str_size];
-        char *dbName = strlwr(getBetween(query, "USE ", ";"));
-        printf("\t--  Database Name: {%s}\n", dbName);
-        sprintf(currentDB, "%s/%s", cwd, dbName);
-        printf("%s\n", currentDB);
-        
-    }
-
     /*
 
     //// DELETE COMMAND ////
@@ -606,9 +502,27 @@ void handleCommand()
             //No Where Query
             if (tableName == NULL)
             {
+                char prevName[str_size], tmpName[str_size], tmpData[str_size];
                 tableName = strlwr(getBetween(query, "FROM ", ";"));
                 printf("\t   --  Table Name: {%s}\n", tableName);
-                jalan = 1;
+
+                sprintf(prevName, "%s/%s/%s", cwd, currentDB, tableName);
+                if (access(prevName, F_OK))
+                {
+                    printf("TABLE DOES NOT EXIST!");
+                }
+                else
+                {
+                    sprintf(tmpName, "%s/%s/[[tmp]]", cwd, currentDB);
+                    printf("%s\n", prevName);
+                    FILE *fp = fopen(prevName, "r");
+                    FILE *fp2 = fopen(tmpName, "w");
+                    fprintf(fp2, "%s", fgets(tmpData, sizeof(tmpData), fp));
+                    fclose(fp);
+                    fclose(fp2);
+                    remove(prevName);
+                    rename(tmpName, prevName);
+                }
             }
             //Where Query Exists
             else
@@ -621,13 +535,64 @@ void handleCommand()
 
                 if (!strcmp(subcmd, "WHERE"))
                 {
-                    char *condition = getBetween(query, "WHERE ", ";");
-                    char *col = getBetween(condition, NULL, "=");
-                    char *val = removeQuotes(getBetween(condition, "=", NULL));
-                    printf("\t   [%s]\n", subcmd);
-                    printf("\t      --  Column: {%s}\n", col);
-                    printf("\t      --  Value: {%s}\n", val);
-                    jalan = 1;
+                    char tablePath[str_size], header[str_size];
+                    sprintf(tablePath, "%s/%s/%s", cwd, currentDB, tableName);
+                    if (access(tablePath, F_OK))
+                    {
+                        printf("TABLE DOES NOT EXIST!");
+                    }
+                    else
+                    {
+                        printf("\t      --  Filepath: {%s}\n", tablePath);
+
+                        FILE *fp = fopen(tablePath, "r");
+                        fgets(header, sizeof(header), fp);
+                        printf("\t      --  Header: {%s}\n", header);
+
+                        char *condition = getBetween(query, "WHERE ", ";");
+                        char *col = getBetween(condition, NULL, "=");
+                        char *val = removeQuotes(getBetween(condition, "=", NULL));
+                        printf("\t   [%s]\n", subcmd);
+                        printf("\t      --  Column: {%s}\n", col);
+                        printf("\t      --  Value: {%s}\n", val);
+
+                        int colNum = findColIndex(header, col);
+                        char *p;
+                        printf("[[%d]]\n", colNum);
+                        char curLine[str_size];
+                        if (colNum != -1)
+                        {
+                            char tmpPath[str_size];
+                            sprintf(tmpPath, "%s/%s/tmp", cwd, currentDB);
+                            printf("\t      --  filepath: {%s}\n", tmpPath);
+                            FILE *nfile = fopen(tmpPath, "w");
+                            fprintf(nfile, "%s", header);
+                            char tmpLine[str_size];
+                            while (fgets(curLine, sizeof(curLine), fp) != NULL)
+                            {
+                                sprintf(tmpLine, "%s", curLine);
+                                printf("\t      --  Line: {%s}\n", curLine);
+                                char *colVal;
+                                colVal = trimString(strtok_r(curLine, ":::", &p));
+                                int tmpIdx = colNum;
+
+                                while (tmpIdx--)
+                                {
+                                    colVal = trimString(strtok_r(NULL, ":::", &p));
+                                }
+
+                                if (strcmp(colVal, val))
+                                {
+                                    fprintf(nfile, "%s", tmpLine);
+                                }
+                            }
+                            fclose(nfile);
+                            remove(tablePath);
+                            rename(tmpPath, tablePath);
+                        }
+
+                        fclose(fp);
+                    }
                 }
             }
         }
@@ -649,16 +614,23 @@ void handleCommand()
         //Dropping Database
         if (!strcmp(subcmd, "DATABASE"))
         {
+            char tmpPath[str_size];
             char *databaseName = strlwr(getBetween(query, "DATABASE ", ";"));
             printf("\t   --  Database Name: {%s}\n", databaseName);
-            jalan = 1;
+
+            sprintf(tmpPath, "%s/%s", cwd, databaseName);
+            printf("\t   --  Filepath: {%s}\n", tmpPath);
+            rmrf(tmpPath);
         }
         //Dropping Table
         else if (!strcmp(subcmd, "TABLE"))
         {
+            char filepath[str_size];
             char *tableName = strlwr(getBetween(query, "TABLE ", ";"));
             printf("\t   --  Table Name: {%s}\n", tableName);
-            jalan = 1;
+
+            sprintf(filepath, "%s/%s/%s", cwd, currentDB, tableName);
+            remove(filepath);
         }
         //Dropping Column on a Table
         else if (!strcmp(subcmd, "COLUMN"))
@@ -675,7 +647,91 @@ void handleCommand()
                 char *tableName = strlwr(getBetween(query, "FROM ", ";"));
 
                 printf("\t   --  Table Name: {%s}\n", tableName);
-                jalan = 1;
+                char tablePath[str_size], header[str_size];
+                sprintf(tablePath, "%s/%s/%s", cwd, currentDB, tableName);
+                if (access(tablePath, F_OK))
+                {
+                    printf("TABLE DOES NOT EXIST!");
+                }
+                else
+                {
+                    printf("\t      --  Filepath: {%s}\n", tablePath);
+
+                    FILE *fp = fopen(tablePath, "r");
+                    fgets(header, sizeof(header), fp);
+                    printf("\t      --  Header: {%s}\n", header);
+
+                    int colNum = findColIndex(header, columnName);
+                    char *p;
+                    printf("[[%d]]\n", colNum);
+                    char curLine[str_size];
+                    if (colNum != -1)
+                    {
+                        char tmpPath[str_size];
+                        sprintf(tmpPath, "%s/%s/tmp", cwd, currentDB);
+                        printf("\t      --  filepath: {%s}\n", tmpPath);
+                        FILE *nfile = fopen(tmpPath, "w");
+
+                        char tmpHeader[str_size];
+                        memset(tmpHeader, 0, sizeof(tmpHeader));
+                        char *colVal, colVal2[str_size];
+
+                        int curNum = 0;
+                        colVal = trimString(strtok_r(header, ":::", &p));
+                        while (1)
+                        {
+                            printf("\t         --  ColVal: {%s}\n", colVal);
+                            sprintf(colVal2, "%s", colVal);
+                            colVal = trimString(strtok_r(NULL, ":::", &p));
+                            if (curNum != colNum)
+                            {
+                                if (colVal != NULL)
+                                    sprintf(tmpHeader, "%s%s:::", tmpHeader, colVal2);
+                                else
+                                {
+                                    sprintf(tmpHeader, "%s%s", tmpHeader, colVal2);
+                                    break;
+                                }
+                            }
+                            curNum++;
+                        }
+                        fprintf(nfile, "%s\n", tmpHeader);
+
+                        char tmpLine[str_size];
+                        while (fgets(curLine, sizeof(curLine), fp) != NULL)
+                        {
+                            memset(tmpLine, 0, sizeof(tmpLine));
+                            printf("\t      --  Line: {%s}\n", curLine);
+
+                            int curNum = 0;
+                            colVal = trimString(strtok_r(curLine, ":::", &p));
+                            while (1)
+                            {
+                                printf("\t         --  ColVal: {%s}\n", colVal);
+                                sprintf(colVal2, "%s", colVal);
+                                colVal = trimString(strtok_r(NULL, ":::", &p));
+                                if (curNum != colNum)
+                                {
+                                    if (colVal != NULL)
+                                        sprintf(tmpLine, "%s%s:::", tmpLine, colVal2);
+                                    else
+                                    {
+                                        sprintf(tmpLine, "%s%s", tmpLine, colVal2);
+                                        break;
+                                    }
+                                }
+                                curNum++;
+                            }
+
+                            fprintf(nfile, "%s\n", tmpLine);
+                        }
+                        fclose(nfile);
+                        remove(tablePath);
+                        rename(tmpPath, tablePath);
+                    }
+
+                    fclose(fp);
+                }
             }
         }
 
@@ -699,17 +755,36 @@ void handleCommand()
             sprintf(tmp, "%s (", tableName);
             printf("\t   --  Table Name: {%s}\n", tableName);
 
-            char *values = strlwr(getBetween(query, tmp, ");"));
-
-            char *p;
-            char *val = trimString(strtok_r(values, ",", &p));
-            while (val != NULL)
+            char tablePath[str_size];
+            sprintf(tablePath, "%s/%s/%s", cwd, currentDB, tableName);
+            if (access(tablePath, F_OK))
             {
-                val = removeQuotes(val);
-                printf("\t      --  {%s}\n", val);
-                val = trimString(strtok_r(NULL, ",", &p));
+                printf("TABLE DOES NOT EXIST!");
             }
-            jalan = 1;
+            else
+            {
+                char *values = strlwr(getBetween(query, tmp, ");"));
+
+                char *p, val2[str_size], line[str_size];
+                memset(line, 0, sizeof(line));
+                char *val = trimString(strtok_r(values, ",", &p));
+
+                while (1)
+                {
+                    val = removeQuotes(val);
+                    printf("\t      --  {%s}\n", val);
+                    sprintf(val2, "%s", val);
+                    val = trimString(strtok_r(NULL, ",", &p));
+                    if (val != NULL)
+                        sprintf(line, "%s%s:::", line, val2);
+                    else
+                    {
+                        sprintf(line, "%s%s", line, val2);
+                        break;
+                    }
+                }
+                appendToFile(tablePath, line);
+            }
         }
 
         free(subcmd);
@@ -735,6 +810,139 @@ void handleCommand()
         {
             tableName = strlwr(getBetween(query, "FROM ", ";"));
             printf("\t   --  Table Name: {%s}\n", tableName);
+
+            char tablePath[str_size], header[str_size];
+            sprintf(tablePath, "%s/%s/%s", cwd, currentDB, tableName);
+            if (access(tablePath, F_OK))
+            {
+                printf("TABLE DOES NOT EXIST!");
+            }
+            else
+            {
+                printf("\t      --  Filepath: {%s}\n", tablePath);
+
+                FILE *fp = fopen(tablePath, "r");
+                fgets(header, sizeof(header), fp);
+                char *cur, *p, cur2[str_size];
+                char curLine[str_size];
+                char toPrint[str_size];
+                memset(toPrint, 0, sizeof(toPrint));
+
+                cur = trimString(strtok_r(header, ":::", &p));
+                while (1)
+                {
+                    sprintf(cur2, "%s", cur);
+                    cur = trimString(strtok_r(NULL, ":::", &p));
+
+                    if (cur != NULL)
+                        sprintf(toPrint, "%s%s\t", toPrint, cur2);
+                    else
+                    {
+                        sprintf(toPrint, "%s%s\n", toPrint, cur2);
+                        break;
+                    }
+                }
+                printf("\e[32m%s\e[0m", toPrint);
+
+                // printf("\t      --  Columns: {%s}\n", columns);
+                if (!strcmp(columns, "*"))
+                {
+                    while (fgets(curLine, sizeof(curLine), fp) != NULL)
+                    {
+                        memset(toPrint, 0, sizeof(toPrint));
+
+                        // printf("\t         --  CurLine: {%s}\n", curLine);
+                        cur = trimString(strtok_r(curLine, ":::", &p));
+                        while (1)
+                        {
+                            // printf("\t         --  ColVal: {%s}\n", cur);
+                            sprintf(cur2, "%s", cur);
+                            // printf("\t         --  ColVal: {%s}\n", cur2);
+                            cur = trimString(strtok_r(NULL, ":::", &p));
+                            if (cur != NULL)
+                                sprintf(toPrint, "%s%s\t\t", toPrint, cur2);
+                            else
+                            {
+                                sprintf(toPrint, "%s%s\n", toPrint, cur2);
+                                break;
+                            }
+                        }
+                        printf("\e[32m%s\e[0m", toPrint);
+                    }
+                }
+
+                // int colNum = findColIndex(header, columnName);
+                // char *p;
+                // printf("[[%d]]\n", colNum);
+                // char curLine[str_size];
+                // if (colNum != -1)
+                // {
+                //     char tmpPath[str_size];
+                //     sprintf(tmpPath, "%s/%s/tmp", cwd, currentDB);
+                //     printf("\t      --  filepath: {%s}\n", tmpPath);
+                //     FILE *nfile = fopen(tmpPath, "w");
+
+                //     char tmpHeader[str_size];
+                //     memset(tmpHeader, 0, sizeof(tmpHeader));
+                //     char *colVal, colVal2[str_size];
+
+                //     int curNum = 0;
+                //     colVal = trimString(strtok_r(header, ":::", &p));
+                //     while (1)
+                //     {
+                //         printf("\t         --  ColVal: {%s}\n", colVal);
+                //         sprintf(colVal2, "%s", colVal);
+                //         colVal = trimString(strtok_r(NULL, ":::", &p));
+
+                //         if (colVal != NULL)
+                //             sprintf(tmpHeader, "%s%s:::", tmpHeader, colVal2);
+                //         else
+                //         {
+                //             sprintf(tmpHeader, "%s%s", tmpHeader, colVal2);
+                //             break;
+                //         }
+
+                //         curNum++;
+                //     }
+                //     fprintf(nfile, "%s\n", tmpHeader);
+
+                //     char tmpLine[str_size];
+                //     while (fgets(curLine, sizeof(curLine), fp) != NULL)
+                //     {
+                //         memset(tmpLine, 0, sizeof(tmpLine));
+                //         printf("\t      --  Line: {%s}\n", curLine);
+
+                //         int curNum = 0;
+                //         colVal = trimString(strtok_r(curLine, ":::", &p));
+                //         while (1)
+                //         {
+                //             printf("\t         --  ColVal: {%s}\n", colVal);
+                //             sprintf(colVal2, "%s", colVal);
+                //             colVal = trimString(strtok_r(NULL, ":::", &p));
+                //             if (curNum == colNum)
+                //             {
+                //                 sprintf(colVal2, "%s", val);
+                //             }
+                //             if (colVal != NULL)
+                //                 sprintf(tmpLine, "%s%s:::", tmpLine, colVal2);
+                //             else
+                //             {
+                //                 sprintf(tmpLine, "%s%s", tmpLine, colVal2);
+                //                 break;
+                //             }
+
+                //             curNum++;
+                //         }
+
+                //         fprintf(nfile, "%s\n", tmpLine);
+                //     }
+                //     fclose(nfile);
+                //     remove(tablePath);
+                //     rename(tmpPath, tablePath);
+                // }
+
+                // fclose(fp);
+            }
         }
         //Where Query Exists
         else
@@ -753,7 +961,6 @@ void handleCommand()
                 printf("\t   [%s]\n", subcmd);
                 printf("\t      --  Column: {%s}\n", col);
                 printf("\t      --  Value: {%s}\n", val);
-                jalan = 1;
             }
 
             free(subcmd);
@@ -777,27 +984,119 @@ void handleCommand()
 
         if (!strcmp(subcmd, "SET"))
         {
-            char *toChange = getBetween(query, "SET ", " ");
+            char *toChange = getBetween(query, "SET ", " WHERE");
 
             //No Where Query
             if (toChange == NULL)
             {
                 toChange = strlwr(getBetween(query, "SET ", ";"));
-                char *col = getBetween(toChange, NULL, "=");
+                char *columnName = getBetween(toChange, NULL, "=");
                 char *val = removeQuotes(getBetween(toChange, "=", NULL));
 
-                printf("\t   --  Column: {%s}\n", col);
+                printf("\t   --  Column: {%s}\n", columnName);
                 printf("\t   --  Value: {%s}\n", val);
-                jalan = 1;
+
+                sprintf(tmp, "%s ", columnName);
+                free(subcmd);
+                subcmd = strupr(getBetween(query, tmp, " "));
+
+                printf("\t   --  Table Name: {%s}\n", tableName);
+                char tablePath[str_size], header[str_size];
+                sprintf(tablePath, "%s/%s/%s", cwd, currentDB, tableName);
+                if (access(tablePath, F_OK))
+                {
+                    printf("TABLE DOES NOT EXIST!");
+                }
+                else
+                {
+                    printf("\t      --  Filepath: {%s}\n", tablePath);
+
+                    FILE *fp = fopen(tablePath, "r");
+                    fgets(header, sizeof(header), fp);
+                    printf("\t      --  Header: {%s}\n", header);
+
+                    int colNum = findColIndex(header, columnName);
+                    char *p;
+                    printf("[[%d]]\n", colNum);
+                    char curLine[str_size];
+                    if (colNum != -1)
+                    {
+                        char tmpPath[str_size];
+                        sprintf(tmpPath, "%s/%s/tmp", cwd, currentDB);
+                        printf("\t      --  filepath: {%s}\n", tmpPath);
+                        FILE *nfile = fopen(tmpPath, "w");
+
+                        char tmpHeader[str_size];
+                        memset(tmpHeader, 0, sizeof(tmpHeader));
+                        char *colVal, colVal2[str_size];
+
+                        int curNum = 0;
+                        colVal = trimString(strtok_r(header, ":::", &p));
+                        while (1)
+                        {
+                            printf("\t         --  ColVal: {%s}\n", colVal);
+                            sprintf(colVal2, "%s", colVal);
+                            colVal = trimString(strtok_r(NULL, ":::", &p));
+
+                            if (colVal != NULL)
+                                sprintf(tmpHeader, "%s%s:::", tmpHeader, colVal2);
+                            else
+                            {
+                                sprintf(tmpHeader, "%s%s", tmpHeader, colVal2);
+                                break;
+                            }
+
+                            curNum++;
+                        }
+                        fprintf(nfile, "%s\n", tmpHeader);
+
+                        char tmpLine[str_size];
+                        while (fgets(curLine, sizeof(curLine), fp) != NULL)
+                        {
+                            memset(tmpLine, 0, sizeof(tmpLine));
+                            printf("\t      --  Line: {%s}\n", curLine);
+
+                            int curNum = 0;
+                            colVal = trimString(strtok_r(curLine, ":::", &p));
+                            while (1)
+                            {
+                                printf("\t         --  ColVal: {%s}\n", colVal);
+                                sprintf(colVal2, "%s", colVal);
+                                colVal = trimString(strtok_r(NULL, ":::", &p));
+                                if (curNum == colNum)
+                                {
+                                    sprintf(colVal2, "%s", val);
+                                }
+                                if (colVal != NULL)
+                                    sprintf(tmpLine, "%s%s:::", tmpLine, colVal2);
+                                else
+                                {
+                                    sprintf(tmpLine, "%s%s", tmpLine, colVal2);
+                                    break;
+                                }
+
+                                curNum++;
+                            }
+
+                            fprintf(nfile, "%s\n", tmpLine);
+                        }
+                        fclose(nfile);
+                        remove(tablePath);
+                        rename(tmpPath, tablePath);
+                    }
+
+                    fclose(fp);
+                }
             }
             //Where Query Exists
             else
             {
                 sprintf(tmp, "%s ", toChange);
-                char *col1 = getBetween(toChange, NULL, "=");
+                printf("TMP %s\n", tmp);
+                char *columnName = getBetween(toChange, NULL, "=");
                 char *val1 = removeQuotes(getBetween(toChange, "=", NULL));
 
-                printf("\t   --  Column: {%s}\n", col1);
+                printf("\t   --  Column: {%s}\n", columnName);
                 printf("\t   --  Value: {%s}\n", val1);
 
                 free(subcmd);
@@ -811,7 +1110,120 @@ void handleCommand()
                     printf("\t   [%s]\n", subcmd);
                     printf("\t      --  Column: {%s}\n", col2);
                     printf("\t      --  Value: {%s}\n", val2);
-                    jalan = 1;
+
+                    sprintf(tmp, "%s ", columnName);
+                    free(subcmd);
+                    subcmd = strupr(getBetween(query, tmp, " "));
+
+                    printf("\t   --  Table Name: {%s}\n", tableName);
+                    char tablePath[str_size], header[str_size];
+                    sprintf(tablePath, "%s/%s/%s", cwd, currentDB, tableName);
+                    if (access(tablePath, F_OK))
+                    {
+                        printf("TABLE DOES NOT EXIST!");
+                    }
+                    else
+                    {
+                        printf("\t      --  Filepath: {%s}\n", tablePath);
+
+                        FILE *fp = fopen(tablePath, "r");
+                        fgets(header, sizeof(header), fp);
+                        printf("\t      --  Header: {%s}\n", header);
+
+                        int colNum = findColIndex(header, columnName);
+                        char *p;
+                        printf("[[%d]]\n", colNum);
+                        char curLine[str_size];
+                        if (colNum != -1)
+                        {
+                            char tmpPath[str_size];
+                            sprintf(tmpPath, "%s/%s/tmp", cwd, currentDB);
+                            printf("\t      --  filepath: {%s}\n", tmpPath);
+                            FILE *nfile = fopen(tmpPath, "w");
+
+                            char tmpHeader[str_size];
+                            memset(tmpHeader, 0, sizeof(tmpHeader));
+                            char *colVal, colVal2[str_size];
+
+                            int curNum = 0;
+                            colVal = trimString(strtok_r(header, ":::", &p));
+                            while (1)
+                            {
+                                printf("\t         --  ColVal: {%s}\n", colVal);
+                                sprintf(colVal2, "%s", colVal);
+                                colVal = trimString(strtok_r(NULL, ":::", &p));
+
+                                if (colVal != NULL)
+                                    sprintf(tmpHeader, "%s%s:::", tmpHeader, colVal2);
+                                else
+                                {
+                                    sprintf(tmpHeader, "%s%s", tmpHeader, colVal2);
+                                    break;
+                                }
+
+                                curNum++;
+                            }
+                            fprintf(nfile, "%s\n", tmpHeader);
+
+                            char tmpLine[str_size], curLineCopy[str_size];
+                            int found;
+                            while (fgets(curLine, sizeof(curLine), fp) != NULL)
+                            {
+                                found = 0;
+                                memset(tmpLine, 0, sizeof(tmpLine));
+                                sprintf(curLineCopy, "%s", curLine);
+                                printf("\t      --  Line: {%s}\n", curLine);
+
+                                int curNum = 0;
+                                colVal = trimString(strtok_r(curLineCopy, ":::", &p));
+                                while (1)
+                                {
+                                    printf("\t         --  ColVal: {%s}\n", colVal);
+                                    sprintf(colVal2, "%s", colVal);
+                                    colVal = trimString(strtok_r(NULL, ":::", &p));
+                                    if (!strcmp(colVal2, val2))
+                                    {
+                                        found = 1;
+                                        printf("FOUND!\n");
+                                        break;
+                                    }
+                                    if (colVal == NULL)
+                                        break;
+
+                                    curNum++;
+                                }
+
+                                curNum = 0;
+                                colVal = trimString(strtok_r(curLine, ":::", &p));
+                                while (1)
+                                {
+                                    printf("\t         --  ColVal: {%s}\n", colVal);
+                                    sprintf(colVal2, "%s", colVal);
+                                    colVal = trimString(strtok_r(NULL, ":::", &p));
+                                    if (curNum == colNum && found)
+                                    {
+                                        sprintf(colVal2, "%s", val1);
+                                    }
+                                    if (colVal != NULL)
+                                        sprintf(tmpLine, "%s%s:::", tmpLine, colVal2);
+                                    else
+                                    {
+                                        sprintf(tmpLine, "%s%s", tmpLine, colVal2);
+                                        break;
+                                    }
+
+                                    curNum++;
+                                }
+
+                                fprintf(nfile, "%s\n", tmpLine);
+                            }
+                            fclose(nfile);
+                            remove(tablePath);
+                            rename(tmpPath, tablePath);
+                        }
+
+                        fclose(fp);
+                    }
                 }
             }
         }
@@ -822,6 +1234,9 @@ void handleCommand()
 
 int main(int argc, char *argv[])
 {
+    checkFile();
+    getcwd(cwd, str_size);
+    sprintf(currentDB, "uwukan");
     // DAEMON
     /* Our process ID and Session ID */
     // pid_t pid, sid;
@@ -861,77 +1276,62 @@ int main(int argc, char *argv[])
 
     // /* The Big Loop */
     // while (1) {
-        checkFile();
-        getcwd(cwd, str_size);
-        strcpy(currentDB, "uwukan");
-        int socket_desc, client_sock, c, *new_sock;
-        struct sockaddr_in server, client;
 
-        //Create socket
-        socket_desc = socket(AF_INET, SOCK_STREAM, 0);
-        if (socket_desc == -1)
+    int socket_desc, client_sock, c, *new_sock;
+    struct sockaddr_in server, client;
+
+    //Create socket
+    socket_desc = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_desc == -1)
+    {
+        printf("Could not create socket");
+    }
+    puts("Socket created");
+
+    //Prepare the sockaddr_in structure
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = INADDR_ANY;
+    server.sin_port = htons(7000);
+
+    //Bind
+    if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
+    {
+        //print the error message
+        perror("Bind failed. Error");
+        return 1;
+    }
+    puts("Bind done");
+
+    //Listen
+    listen(socket_desc, 3);
+
+    //Accept and incoming connection
+    puts("Waiting for incoming connections...");
+    c = sizeof(struct sockaddr_in);
+    while ((client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c)))
+    {
+        puts("Connection accepted");
+
+        pthread_t sniffer_thread;
+        new_sock = malloc(1);
+        *new_sock = client_sock;
+
+        if (pthread_create(&sniffer_thread, NULL, connection_handler, (void *)new_sock) < 0)
         {
-            printf("Could not create socket");
-        }
-        puts("Socket created");
-
-        //Prepare the sockaddr_in structure
-        server.sin_family = AF_INET;
-        server.sin_addr.s_addr = INADDR_ANY;
-        server.sin_port = htons(7000);
-
-        //Bind
-        if (bind(socket_desc, (struct sockaddr *)&server, sizeof(server)) < 0)
-        {
-            //print the error message
-            perror("Bind failed. Error");
+            perror("Could not create thread");
             return 1;
         }
-        puts("Bind done");
 
-        //Listen
-        listen(socket_desc, 3);
+        //Now join the thread , so that we dont terminate before the thread
+        pthread_join(sniffer_thread, NULL);
+        puts("Handler assigned");
+    }
 
-        //Accept and incoming connection
-        puts("Waiting for incoming connections...");
-        c = sizeof(struct sockaddr_in);
-        while ((client_sock = accept(socket_desc, (struct sockaddr *)&client, (socklen_t *)&c)))
-        {
-            puts("Connection accepted");
-
-            // Waits for incoming message from client.
-        // ret_val2 = recv(sock, id, sizeof(id), 0);
-        // ret_val3 = recv(sock, password, sizeof(password), 0);
-        // if(!checkIdentity(id, password))
-        //     status_val = send(sock,
-        //         "wrongpass", SIZE_BUF, 0);
-        // else {
-        //     loggedin = 1;
-        //     status_val = send(sock,
-        //                     "regloginsuccess", SIZE_BUF, 0);
-        //     sprintf(idpass, "%s:%s", id, password);
-        // }
-
-            pthread_t sniffer_thread;
-            new_sock = malloc(1);
-            *new_sock = client_sock;
-
-            if (pthread_create(&sniffer_thread, NULL, connection_handler, (void *)new_sock) < 0)
-            {
-                perror("Could not create thread");
-                return 1;
-            }
-
-            //Now join the thread , so that we dont terminate before the thread
-            pthread_join(sniffer_thread, NULL);
-            puts("Handler assigned");
-        }
-
-        if (client_sock < 0)
-        {
-            perror("accept failed");
-            return 1;
-        }
+    if (client_sock < 0)
+    {
+        perror("accept failed");
+        return 1;
+    }
     //     sleep(30); /* wait 30 seconds */
     //     break;
     // }
@@ -945,46 +1345,21 @@ int main(int argc, char *argv[])
  * */
 void *connection_handler(void *socket_desc)
 {
-    int loggedin = 0;
     //Get the socket descriptor
-    sock = *(int *)socket_desc;
+    int sock = *(int *)socket_desc;
     int read_size;
     char *message, client_message[1024];
-    int ret_val2, ret_val3, status_val;
-    char id[SIZE_BUF], password[SIZE_BUF];
-    char idpass[256];
 
     bzero(client_message, 1024 * sizeof(client_message[0]));
     //Receive a message from client
-    recv(sock, client_message, 1024, 0);
-    strcpy(unpassroot, client_message);
-    if(!checkIdentity(client_message))
-    {
-        send(sock, "User not found", 1024, 0);
-        printf("User not found\n");
-    }
     while ((read_size = recv(sock, client_message, 1024, 0)) > 0)
     {
-        if (strlen(client_message) == 0 || !(client_message[0] >= 33 && client_message[0] <= 126))
-        {
-            continue;
-        }
-
         printf("%s\n", client_message);
         sprintf(queryGlobal, "%s", client_message);
-
+        // handleCommand();
         if (safe_run(handleCommand))
         {
-            if(jalan == 1)
-            {
-                printf("Query Success!\n");
-                send(sock, "Query Success!", 1024, 0);
-            }
-            else
-            {
-                printf("Query Error!\n");
-                send(sock, "Query Error!", 1024, 0);
-            }
+            //
         }
         else
         {
@@ -992,10 +1367,11 @@ void *connection_handler(void *socket_desc)
             send(sock, "Query Error!", 1024, 0);
         }
         printf("\n\n");
-        // write(sock, client_message, strlen(client_message));
+        write(sock, client_message, strlen(client_message));
         bzero(client_message, 1024 * sizeof(client_message[0]));
         bzero(message, 1024 * sizeof(message[0]));
     }
+
     if (read_size == 0)
     {
         puts("Client Disconnected\n");
